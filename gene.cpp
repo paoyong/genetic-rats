@@ -10,7 +10,7 @@
 #include <stdio.h>
 
 /* Number of random of rats to initialize */
-#define INITIAL_POPULATION          10000
+#define INITIAL_POPULATION          200
 
 /* Number of generations to run */
 #define NUM_GENERATIONS             100
@@ -30,8 +30,12 @@
 #define GENE_MUTATE_OUTOF           100
 
 #define CROSSOVER_RATE_PERCENT      35
-#define NUM_COUPLES_TO_PICK         25
+#define NUM_COUPLES_TO_PICK         15
 #define NUM_CHILDREN                4
+
+/* 0 = We don't insert database rats into new population
+ * 1 = We doooo */
+#define USE_DATABASE                1
 
 using namespace std;
 
@@ -545,10 +549,9 @@ static int callback(void *data, int argc, char **argv, char **azColName){
  * Given a vector<Gene> and a vector<Gene>, inserts the Gene into the population.
  * -----------------------------------------------------------------------
  */
-void injectRatIntoPopulation(vector<Gene> & newpop, vector<Gene> & oldpop)
+void injectRatsIntoPopulation(vector<Gene> & oldpop, vector<Gene> & newpop)
 {
-    vector<Gene>::iterator it;
-    for(it = newpop.begin(); it < newpop.end(); it++)
+    for(vector<Gene>::iterator it = newpop.begin(); it < newpop.end(); it++)
     {
         oldpop.push_back(*it);
     }
@@ -592,6 +595,12 @@ void insertGenomeIntoDatabase(Gene g)
     sqlite3_close(ratsdb);
 }
 
+/* -----------------------------------------------------------------------
+ * grabAllGenesFromDatabase
+ *
+ * Returns a vector<Gene> of all the genes from the rats.db database
+ * -----------------------------------------------------------------------
+ */
 vector<Gene> grabAllGenesFromDatabase()
 {
     vector<Gene> databaseRats;
@@ -600,6 +609,8 @@ vector<Gene> grabAllGenesFromDatabase()
     sqlite3_stmt *res;
     int rc = sqlite3_open("rats.db", &ratsdb);
     const char * tail;
+    const char * fitnessData; 
+    const char * genomeData;
 
     if (rc) {
         fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(ratsdb));
@@ -619,13 +630,12 @@ vector<Gene> grabAllGenesFromDatabase()
     while(sqlite3_step(res) == SQLITE_ROW)
     {
         Gene g;
-        g.fitness = sqlite3_column_text(res, 0)
-        g.genome = sqlite3_column_text(res, 1);
-    }
-    vector<Gene>::iterator it;
-    for (it = databaseRats.begin(); it < databaseRats.end(); it++)
-    {
-        cout << "rat found with fitness of " << *it.fitness << endl;
+        char *pEnd;
+        fitnessData = reinterpret_cast<const char *>(sqlite3_column_text(res, 0));
+        genomeData = reinterpret_cast<const char *>(sqlite3_column_text(res, 1));
+        g.fitness = strtoul(fitnessData, &pEnd, 10);
+        g.genome = string(genomeData);
+        databaseRats.push_back(g);
     }
 
     sqlite3_finalize(res);
@@ -761,14 +771,23 @@ double findAverageFitness(vector<Gene> & pool)
     
     avg = sum/pool.size();
     return avg;
-    
 }
 
 void keithsReproduceForGenerations(string mapS, int startRow, int startCol, int numGenerations)
 {
+    vector<Gene> children;
+
     /* Our first N randomized genes to get the ball rolling, run it and choose mates */
     vector<Gene> firstNGenes = makeGeneVector(INITIAL_POPULATION);
-    vector<Gene> children;
+
+    /* Inject database rats into our initial population if desired */
+    if (USE_DATABASE == 1)
+    {
+        vector<Gene> dbRats;
+        dbRats = grabAllGenesFromDatabase();
+        injectRatsIntoPopulation(firstNGenes, dbRats);
+    }
+
     runPopThroughMaze(mapS, startRow, startCol, firstNGenes);
     cout << "Generation " << 1 << " has population of " << firstNGenes.size() << endl;
 
